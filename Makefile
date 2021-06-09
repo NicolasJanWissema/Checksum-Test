@@ -16,10 +16,10 @@ CLASS_FILES=$(CLASSES:%.class=$(SRCDIR)/%.class)
 
 default: $(CLASS_FILES)
 
-client: $(CLASS_FILES)
+client:
 	java -cp $(CLASSPATH) ClientSide $(PORT)
 
-server: $(CLASS_FILES)
+server:
 	java -cp $(CLASSPATH) ServerSide $(PORT)
 
 docs:

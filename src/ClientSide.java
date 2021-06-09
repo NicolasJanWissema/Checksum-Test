@@ -1,5 +1,6 @@
 import java.io.IOException;
 import java.net.*;
+import java.nio.charset.StandardCharsets;
 import java.util.Scanner;
 import java.util.zip.CRC32;
 import java.util.zip.Checksum;
@@ -21,13 +22,13 @@ public class ClientSide {
 
         int port;
         try{
-            port = Integer.parseInt(args[0]);
+            port = Integer.parseInt(args[1]);
         }
         catch (NumberFormatException ex){
             System.out.println("Syntax: ChatServer <port> where port is integer");
             return;
         }
-        String hostIP = args[1];
+        String hostIP = args[0];
 
         ClientSide server = new ClientSide(hostIP,port);
         server.service();
@@ -45,22 +46,28 @@ public class ClientSide {
             }
             else{
                 System.out.println("message: "+message);
+                long checkSum = getCRC32Checksum(message.getBytes());
+                System.out.println("message Checksum: "+checkSum);
                 System.out.println("Sending message to server...");
                 try {
                     DatagramSocket socket = new DatagramSocket();
                     socket.setSoTimeout(5000);
 
                     InetAddress serverAddress = InetAddress.getByName(hostname);
-                    byte[] buffer = (message).getBytes();
-                    System.out.println(getCRC32Checksum(buffer));
-                    DatagramPacket request = new DatagramPacket(buffer, buffer.length, serverAddress, port);
-                    socket.send(request);
+                    sendRequest(message,socket);
 
-                    DatagramPacket response = new DatagramPacket(buffer, buffer.length);
-                    socket.receive(response);
-                    byte[] data = new byte[512];
-                    String clientData = new String(data, 0, data.length);
-                    System.out.println(data.toString());
+                    System.out.println("Waiting for server input...");
+                    String responseData = packetStep(socket);
+                    System.out.println("Response from server: "+responseData); //test for response
+                    System.out.println("Response Checksum: "+getCRC32Checksum(responseData.getBytes()));
+
+                    if (getCRC32Checksum(responseData.getBytes())==checkSum){
+                        System.out.println("Response CheckSum equal to original message Checksum. Checksum working.");
+                    }
+                    else{
+                        System.out.println("Response not CheckSum equal to original message Checksum. Checksum not working.");
+                    }
+
                     socket.close();
                 }
                 catch (SocketTimeoutException ex) {
@@ -71,6 +78,70 @@ public class ClientSide {
                     ex.printStackTrace();
                 }
             }
+        }
+    }
+
+    public String packetStep(DatagramSocket socket) throws IOException {
+        byte[] buffer = new byte[512];
+        DatagramPacket response = new DatagramPacket(buffer, buffer.length);
+        socket.receive(response);
+        String responseData = new String(buffer, 0, response.getLength()).trim(); // extracts the response data in the form of a string"
+        int numPackets = Integer.parseInt(responseData.split("‖")[0].split("/")[1]); // extracts the total number of packets from responseData
+
+        if(numPackets != 1){
+            StringBuilder fullResponse = new StringBuilder();
+
+            String[] m = new String[numPackets]; // an array to ensure correct placement of messages
+            int place = Integer.parseInt(responseData.split("‖")[0].split("/")[0])-1; // the packet number of the given response
+            m[place] = responseData.split("‖")[1].trim(); // places the message in the correct position in the array
+            try {
+                for(int i = 0; i<(numPackets-1); i++){ // loop to ensure all responses are received and placed correctly according to packet number
+                    socket.receive(response);
+                    responseData = new String(buffer, 0, response.getLength()).trim();
+                    place = Integer.parseInt(responseData.split("‖")[0].split("/")[0])-1;
+                    m[place] = responseData.split("‖")[1].trim();
+                }
+                for(int j = 0; j<numPackets; j++){
+                    fullResponse.append(m[j]);
+                }
+            } catch (SocketTimeoutException ex) {
+                System.out.println("Timeout error: " + ex.getMessage());
+                ex.printStackTrace();
+            } catch (IOException ex) {
+                System.out.println("Client error: " + ex.getMessage());
+                ex.printStackTrace();
+            }
+            return fullResponse.toString();
+        }
+        else {
+            return(responseData.split("‖")[1].trim());
+        }
+    }
+
+    private void sendRequest(String ans, DatagramSocket socket) throws IOException{
+        String[] packs;
+        int messageSize = 480;
+        if(ans.length()> messageSize){
+            int packNum = ans.length()/ messageSize;
+            packs = new String[packNum+1];
+            int extra = ans.length()-ans.length()% messageSize;
+            int temp=0;
+            for(int i=0;i< extra;i+= messageSize){
+                packs[temp] = ans.substring(i, i+ messageSize);
+                temp++;
+            }
+            packs[packNum] = ans.substring(extra);
+        }
+        else{
+            packs=new String[1];
+            packs[0] = ans;
+        }
+        //Send packets
+        InetAddress serverAddress = InetAddress.getByName(hostname);
+        for (int i=0;i< packs.length;i++){
+            byte[] buffer = (i+1+"/"+ packs.length+"‖"+packs[i]).getBytes();
+            DatagramPacket response = new DatagramPacket(buffer, buffer.length, serverAddress, port);
+            socket.send(response);
         }
     }
 
